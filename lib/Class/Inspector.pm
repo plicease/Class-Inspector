@@ -12,24 +12,24 @@ use File::Spec ();
 
 =head1 SYNOPSIS
 
-  use Class::Inspector;
-  
-  # Is a class installed and/or loaded
-  Class::Inspector->installed( 'Foo::Class' );
-  Class::Inspector->loaded( 'Foo::Class' );
-  
-  # Filename related information
-  Class::Inspector->filename( 'Foo::Class' );
-  Class::Inspector->resolved_filename( 'Foo::Class' );
-  
-  # Get subroutine related information
-  Class::Inspector->functions( 'Foo::Class' );
-  Class::Inspector->function_refs( 'Foo::Class' );
-  Class::Inspector->function_exists( 'Foo::Class', 'bar' );
-  Class::Inspector->methods( 'Foo::Class', 'full', 'public' );
-  
-  # Find all loaded subclasses or something
-  Class::Inspector->subclasses( 'Foo::Class' );
+ use Class::Inspector;
+ 
+ # Is a class installed and/or loaded
+ Class::Inspector->installed( 'Foo::Class' );
+ Class::Inspector->loaded( 'Foo::Class' );
+ 
+ # Filename related information
+ Class::Inspector->filename( 'Foo::Class' );
+ Class::Inspector->resolved_filename( 'Foo::Class' );
+ 
+ # Get subroutine related information
+ Class::Inspector->functions( 'Foo::Class' );
+ Class::Inspector->function_refs( 'Foo::Class' );
+ Class::Inspector->function_exists( 'Foo::Class', 'bar' );
+ Class::Inspector->methods( 'Foo::Class', 'full', 'public' );
+ 
+ # Find all loaded subclasses or something
+ Class::Inspector->subclasses( 'Foo::Class' );
 
 =head1 DESCRIPTION
 
@@ -81,8 +81,7 @@ or C<undef> if the class name is invalid.
 =cut
 
 sub _resolved_inc_handler {
-  my $class    = shift;
-  my $filename = $class->_inc_filename(shift) or return undef;
+  my $filename = _inc_filename(shift) or return undef;
 
   foreach my $inc ( @INC ) {
     my $ref = ref $inc;
@@ -113,7 +112,7 @@ sub _resolved_inc_handler {
 
 sub installed {
   my $class = shift;
-  !! ($class->loaded_filename($_[0]) or $class->resolved_filename($_[0]) or $class->_resolved_inc_handler($_[0]));
+  !! ($class->loaded_filename($_[0]) or $class->resolved_filename($_[0]) or _resolved_inc_handler($_[0]));
 }
 
 =pod
@@ -139,12 +138,11 @@ class name is invalid.
 
 sub loaded {
   my $class = shift;
-  my $name  = $class->_class(shift) or return undef;
-  $class->_loaded($name);
+  my $name  = _class(shift) or return undef;
+  _loaded($name);
 }
 
 sub _loaded {
-  my $class = shift;
   my $name  = shift;
 
   # Handle by far the two most common cases
@@ -160,7 +158,7 @@ sub _loaded {
 
   # No functions, and it doesn't have a version, and isn't anything.
   # As an absolute last resort, check for an entry in %INC
-  my $filename = $class->_inc_filename($name);
+  my $filename = _inc_filename($name);
   return 1 if defined $INC{$filename};
 
   '';
@@ -188,7 +186,7 @@ Returns the filename on success or C<undef> if the class name is invalid.
 
 sub filename {
   my $class = shift;
-  my $name  = $class->_class(shift) or return undef;
+  my $name  = _class(shift) or return undef;
   File::Spec->catfile( split /(?:\'|::)/, $name ) . '.pm';
 }
 
@@ -217,14 +215,14 @@ invalid.
 
 sub resolved_filename {
   my $class     = shift;
-  my $filename  = $class->_inc_filename(shift) or return undef;
+  my $filename  = _inc_filename(shift) or return undef;
   my @try_first = @_;
 
   # Look through the @INC path to find the file
   foreach ( @try_first, @INC ) {
     my $full = "$_/$filename";
     next unless -e $full;
-    return $UNIX ? $full : $class->_inc_to_local($full);
+    return $UNIX ? $full : _inc_to_local($full);
   }
 
   # File not found
@@ -248,8 +246,8 @@ file.
 
 sub loaded_filename {
   my $class    = shift;
-  my $filename = $class->_inc_filename(shift);
-  $UNIX ? $INC{$filename} : $class->_inc_to_local($INC{$filename});
+  my $filename = _inc_filename(shift);
+  $UNIX ? $INC{$filename} : _inc_to_local($INC{$filename});
 }
 
 
@@ -277,7 +275,7 @@ if the class name is invalid or the class is not loaded.
 
 sub functions {
   my $class = shift;
-  my $name  = $class->_class(shift) or return undef;
+  my $name  = _class(shift) or return undef;
   return undef unless $class->loaded( $name );
 
   # Get all the CODE symbol table entries
@@ -305,7 +303,7 @@ success, or C<undef> if the class is not loaded.
 
 sub function_refs {
   my $class = shift;
-  my $name  = $class->_class(shift) or return undef;
+  my $name  = _class(shift) or return undef;
   return undef unless $class->loaded( $name );
 
   # Get all the CODE symbol table entries, but return
@@ -336,7 +334,7 @@ class or function name are invalid, or the class is not loaded.
 
 sub function_exists {
   my $class    = shift;
-  my $name     = $class->_class( shift ) or return undef;
+  my $name     = _class( shift ) or return undef;
   my $function = shift or return undef;
 
   # Only works if the class is loaded
@@ -417,7 +415,7 @@ the following.
 
 sub methods {
   my $class     = shift;
-  my $name      = $class->_class( shift ) or return undef;
+  my $name      = _class( shift ) or return undef;
   my @arguments = map { lc $_ } @_;
 
   # Process the arguments to determine the options
@@ -519,16 +517,27 @@ is invalid.
 
 =cut
 
+sub _subnames {
+  my ($name) = @_;
+  return sort
+    grep {  ## no critic (ControlStructures::ProhibitMutatingListFunctions)
+      substr($_, -2, 2, '') eq '::'
+      and
+      /$RE_IDENTIFIER/o
+    }
+    keys %{"${name}::"};
+}
+
 sub subclasses {
   my $class = shift;
-  my $name  = $class->_class( shift ) or return undef;
+  my $name  = _class( shift ) or return undef;
 
   # Prepare the search queue
   my @found = ();
-  my @queue = grep { $_ ne 'main' } $class->_subnames('');
+  my @queue = grep { $_ ne 'main' } _subnames('');
   while ( @queue ) {
     my $c = shift(@queue); # c for class
-    if ( $class->_loaded($c) ) {
+    if ( _loaded($c) ) {
       # At least one person has managed to misengineer
       # a situation in which ->isa could die, even if the
       # class is real. Trap these cases and just skip
@@ -547,21 +556,10 @@ sub subclasses {
     # Add any child namespaces to the head of the queue.
     # This keeps the queue length shorted, and allows us
     # not to have to do another sort at the end.
-    unshift @queue, map { "${c}::$_" } $class->_subnames($c);
+    unshift @queue, map { "${c}::$_" } _subnames($c);
   }
 
   @found ? \@found : '';
-}
-
-sub _subnames {
-  my ($class, $name) = @_;
-  return sort
-    grep {  ## no critic
-      substr($_, -2, 2, '') eq '::'
-      and
-      /$RE_IDENTIFIER/o
-    }
-    keys %{"${name}::"};
 }
 
 
@@ -578,7 +576,7 @@ sub _subnames {
 # Find all the loaded classes below us
 sub children {
   my $class = shift;
-  my $name  = $class->_class(shift) or return ();
+  my $name  = _class(shift) or return ();
 
   # Find all the Foo:: elements in our symbol table
   no strict 'refs';
@@ -588,7 +586,7 @@ sub children {
 # As above, but recursively
 sub recursive_children {
   my $class    = shift;
-  my $name     = $class->_class(shift) or return ();
+  my $name     = _class(shift) or return ();
   my @children = ( $name );
 
   # Do the search using a nicer, more memory efficient
@@ -610,11 +608,10 @@ sub recursive_children {
 
 
 #####################################################################
-# Private Methods
+# Private Functions
 
 # Checks and expands ( if needed ) a class name
 sub _class {
-  my $class = shift;
   my $name  = shift or return '';
 
   # Handle main shorthand
@@ -628,21 +625,19 @@ sub _class {
 # Create a INC-specific filename, which always uses '/'
 # regardless of platform.
 sub _inc_filename {
-  my $class = shift;
-  my $name  = $class->_class(shift) or return undef;
+  my $name  = _class(shift) or return undef;
   join( '/', split /(?:\'|::)/, $name ) . '.pm';
 }
 
 # Convert INC-specific file name to local file name
 sub _inc_to_local {
   # Shortcut in the Unix case
-  return $_[1] if $UNIX;
+  return $_[0] if $UNIX;
 
   # On other places, we have to deal with an unusual path that might look
   # like C:/foo/bar.pm which doesn't fit ANY normal pattern.
   # Putting it through splitpath/dir and back again seems to normalise
   # it to a reasonable amount.
-  my $class              = shift;
   my $inc_name           = shift or return undef;
   my ($vol, $dir, $file) = File::Spec->splitpath( $inc_name );
   $dir = File::Spec->catdir( File::Spec->splitdir( $dir || "" ) );
